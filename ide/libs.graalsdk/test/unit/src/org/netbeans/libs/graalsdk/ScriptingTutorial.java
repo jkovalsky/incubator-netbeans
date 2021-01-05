@@ -18,14 +18,18 @@
  */
 package org.netbeans.libs.graalsdk;
 
+import java.io.IOException;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.function.Function;
 import javax.script.Invocable;
 import javax.script.ScriptContext;
 import javax.script.ScriptEngine;
 import javax.script.ScriptEngineFactory;
 import javax.script.ScriptEngineManager;
+import javax.script.ScriptException;
 import org.netbeans.api.scripting.Scripting;
 
 
@@ -214,6 +218,19 @@ public class ScriptingTutorial extends NbTestCase {
     }
 
     public void callRFunctionFromJava() throws Exception {
+        // BEGIN: org.netbeans.libs.graalsdk.ScriptingTutorial#allowAllAccess
+        // FastR currently needs access to native libraries:
+        final ScriptEngineManager manager = Scripting.newBuilder().allowAllAccess(true).build();
+        ScriptEngine rEngine = manager.getEngineByMimeType("application/x-r");
+        // END: org.netbeans.libs.graalsdk.ScriptingTutorial#allowAllAccess
+
+        final Object funcRaw = rEngine.eval("qbinom");
+        BinomQuantile func = ((Invocable) rEngine).getInterface(funcRaw, BinomQuantile.class);
+        assertEquals(4, func.qbinom(0.37, 10, 0.5));
+    }
+    // END: org.netbeans.libs.graalsdk.ScriptingTutorial#callRFunctionFromJava
+
+    public void testCallRFunctionFromJavaTheOldWay() throws Exception {
         ScriptEngine rEngine = Scripting.createManager().getEngineByMimeType("application/x-r");
         // FastR currently needs access to native libraries:
         rEngine.getContext().setAttribute("allowAllAccess", true, ScriptContext.GLOBAL_SCOPE);
@@ -222,7 +239,6 @@ public class ScriptingTutorial extends NbTestCase {
         BinomQuantile func = ((Invocable) rEngine).getInterface(funcRaw, BinomQuantile.class);
         assertEquals(4, func.qbinom(0.37, 10, 0.5));
     }
-    // END: org.netbeans.libs.graalsdk.ScriptingTutorial#callRFunctionFromJava
 
     public void testCallJavaScriptFunctionsWithSharedStateFromJava() throws Exception {
         callJavaScriptFunctionsWithSharedStateFromJava();
@@ -516,7 +532,7 @@ public class ScriptingTutorial extends NbTestCase {
     }
 
     public void accessJavaScriptJSONObjectFromJava() throws Exception {
-        String src = 
+        String src =
             "(function () { \n" +
             "  return function() {\n" +
             "    return [\n" +
@@ -566,4 +582,68 @@ public class ScriptingTutorial extends NbTestCase {
 
     // END: org.netbeans.libs.graalsdk.ScriptingTutorial#accessJavaScriptJSONObjectFromJava
 
+    public void testHandleScriptException() throws Exception {
+        handleScriptExceptions();
+    }
+    
+    public static class Callback {
+        public String next(List<String> l) {
+            return l.iterator().next();
+        }
+        
+        public void io() throws IOException {
+            throw new IOException("");
+        }
+    }
+    
+    // Checkstyle: stop
+    public void handleScriptExceptions() throws Exception {
+        // BEGIN: org.netbeans.libs.graalsdk.ScriptingTutorial#handleScriptExceptions
+        // this is error in Javascript (null dereference), so ScriptException will be thrown,
+        // with scripting engine's implementation exception inside.
+        try {
+            engine.eval(
+                 "var a = null;\n"
+                + "a.call(null)");
+        } catch (ScriptException ex) {
+        }
+        
+        // The callback will throw a checked exception - something that happens
+        // "outside" the script in the runtime: will throw RuntimeException subclass
+        // with the real exception set as cause.
+        Callback cb = new Callback();
+        try {
+            Object jsFunction = engine.eval(
+                  "(function(cb) {"
+                + " cb.io();"
+                + "})"
+            );
+            ((Invocable) engine).invokeMethod(jsFunction, "call", null, cb);
+        } catch (RuntimeException ex) {
+            // this is a checked java exception; it's just wrapped into a
+            // RuntimeException:
+            assertTrue(ex.getCause() instanceof IOException);
+        } catch (Exception ex) {
+            fail("Runtime expected");
+        }
+        
+        // the last exception is a runtime exception originating from java.
+        // it will be reported 'as is' or wrapped, depending on the engine
+        try {
+            Object jsFunction = engine.eval(
+                  "(function(cb, l) {"
+                + " cb.next(l);"
+                + "})"
+            );
+            ((Invocable) engine).invokeMethod(jsFunction, "call", null, cb, new LinkedList());
+        } catch (NoSuchElementException ex) {
+            // this is a checked java exception; it's thrown unchanged.
+        } catch (RuntimeException ex) {
+            // ... or wrapped in a Runtime:
+            assertTrue(ex.getCause() instanceof NoSuchElementException);
+        } catch (Exception ex) {
+            fail("NoSuchElement expected");
+        }
+        // END: org.netbeans.libs.graalsdk.ScriptingTutorial#handleScriptExceptions
+    }
 }

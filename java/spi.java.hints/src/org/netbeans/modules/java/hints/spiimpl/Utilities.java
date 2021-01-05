@@ -51,13 +51,12 @@ import com.sun.tools.javac.api.JavacScope;
 import com.sun.tools.javac.api.JavacTaskImpl;
 import com.sun.tools.javac.api.JavacTrees;
 import com.sun.tools.javac.code.Flags;
+import com.sun.tools.javac.code.Symbol.ClassSymbol;
 import com.sun.tools.javac.code.Symtab;
 import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.comp.Annotate;
-import com.sun.tools.javac.comp.ArgumentAttr;
 import com.sun.tools.javac.comp.Attr;
 import com.sun.tools.javac.comp.AttrContext;
-import com.sun.tools.javac.comp.Enter;
 import com.sun.tools.javac.comp.Env;
 import com.sun.tools.javac.comp.Modules;
 import com.sun.tools.javac.comp.Todo;
@@ -87,18 +86,14 @@ import com.sun.tools.javac.util.JCDiagnostic;
 import com.sun.tools.javac.util.ListBuffer;
 import com.sun.tools.javac.util.Log;
 import com.sun.tools.javac.util.Names;
-import com.sun.tools.javadoc.main.Messager;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.io.File;
 import java.io.IOException;
-import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 import java.lang.ref.Reference;
 import java.lang.ref.WeakReference;
-import java.lang.reflect.Field;
-import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.URI;
 import java.nio.CharBuffer;
@@ -157,7 +152,6 @@ import org.netbeans.modules.java.hints.providers.spi.ClassPathBasedHintProvider;
 import org.netbeans.modules.java.hints.providers.spi.HintDescription;
 import org.netbeans.modules.java.hints.providers.spi.Trigger.PatternDescription;
 import org.netbeans.modules.java.hints.spiimpl.JackpotTrees.CatchWildcard;
-import org.netbeans.modules.java.hints.spiimpl.JackpotTrees.VariableWildcard;
 import org.netbeans.modules.java.source.JavaSourceAccessor;
 import org.netbeans.modules.java.source.builder.TreeFactory;
 import org.netbeans.lib.nbjavac.services.CancelService;
@@ -173,7 +167,6 @@ import org.netbeans.spi.editor.hints.Severity;
 import org.netbeans.spi.java.classpath.support.ClassPathSupport;
 import org.openide.filesystems.FileObject;
 import org.openide.filesystems.FileUtil;
-import org.openide.util.Exceptions;
 import org.openide.util.Lookup;
 import org.openide.util.NbCollections;
 import org.openide.util.WeakListeners;
@@ -199,9 +192,10 @@ public class Utilities {
     }
 
     private static final String DISABLE_ERRORS = "disable-java-errors";
+    private static final String SWITCH_EXPRESSION = "SWITCH_EXPRESSION";
     
 
-    public static <E> Iterable<E> checkedIterableByFilter(final Iterable raw, final Class<E> type, final boolean strict) {
+    public static <E> Iterable<E> checkedIterableByFilter(final Iterable<?> raw, final Class<E> type, final boolean strict) {
         return new Iterable<E>() {
             public Iterator<E> iterator() {
                 return NbCollections.checkedIteratorByFilter(raw.iterator(), type, strict);
@@ -377,7 +371,7 @@ public class Utilities {
             patternTree = ((SwitchTree) switchTree).getCases().get(0);
         }
 
-        if (patternTree == null || isErrorTree(patternTree) || "SWITCH_EXPRESSION".equals(patternTree.getKind().name())) {
+        if (patternTree == null || isErrorTree(patternTree) || SWITCH_EXPRESSION.equals(patternTree.getKind().name())) {
             SourcePositions[] currentPatternTreePositions = new SourcePositions[1];
             List<Diagnostic<? extends JavaFileObject>> currentPatternTreeErrors = new LinkedList<Diagnostic<? extends JavaFileObject>>();
             Tree currentPatternTree = parseStatement(c, "{" + pattern + "}", currentPatternTreePositions, currentPatternTreeErrors);
@@ -729,7 +723,9 @@ public class Utilities {
 
         long count = inc++;
 
-        clazz.append("public class $$scopeclass$constraints$" + count + "{");
+        String classname = "$$scopeclass$constraints$" + count;
+
+        clazz.append("public class " + classname + "{");
 
         for (Entry<String, TypeMirror> e : constraints.entrySet()) {
             if (e.getValue() != null) {
@@ -752,6 +748,8 @@ public class Utilities {
         Log log = Log.instance(context);
         NBResolve resolve = NBResolve.instance(context);
         Annotate annotate = Annotate.instance(context);
+        Names names = Names.instance(context);
+        Symtab syms = Symtab.instance(context);
         Log.DiagnosticHandler discardHandler = new Log.DiscardDiagnosticHandler(compiler.log);
 
         JavaFileObject jfo = FileObjects.memoryFileObject("$", "$", new File("/tmp/$$scopeclass$constraints$" + count + ".java").toURI(), System.currentTimeMillis(), clazz.toString());
@@ -772,7 +770,8 @@ public class Utilities {
             }
             
             JCCompilationUnit cut = compiler.parse(jfo);
-            modules.enter(com.sun.tools.javac.util.List.of(cut), null);
+            ClassSymbol enteredClass = syms.enterClass(modules.getDefaultModule(), names.fromString("$$." + classname));
+            modules.enter(com.sun.tools.javac.util.List.of(cut), enteredClass);
             compiler.enterTrees(com.sun.tools.javac.util.List.of(cut));
 
             Todo todo = compiler.todo;
@@ -1274,14 +1273,8 @@ public class Utilities {
         return false;
     }
 
-    public static boolean isJavadocSupported(CompilationInfo info) {
-        Context c = JavaSourceAccessor.getINSTANCE().getJavacTask(info).getContext();
-
-        try {
-        return c.get(Log.logKey) instanceof Messager;
-        } catch (NoClassDefFoundError e) {
-            return false;
-        }
+    public static boolean isJavadocSupported(CompilationInfo info) { //TODO: unnecessary?
+        return true;
     }
 
     private static Class<?> parserClass;
@@ -1361,6 +1354,33 @@ public class Utilities {
             return super.modifiersOpt(partial);
         }
 
+
+        public JCVariableDecl formalParameter(boolean lambdaParam, boolean recordComponents) {
+            if (token.kind == TokenKind.IDENTIFIER) {
+                if (token.name().startsWith(dollar)) {
+                    com.sun.tools.javac.util.Name name = token.name();
+
+                    Token peeked = S.token(1);
+
+                    if (peeked.kind == TokenKind.COMMA || peeked.kind == TokenKind.RPAREN) {
+                        nextToken();
+                        return JackpotTrees.createVariableWildcard(ctx, name);
+                    }
+                }
+            }
+            JCTree.JCVariableDecl result = null;
+            try {
+                Class[] paramTypes = {boolean.class, boolean.class};
+                result = (JCTree.JCVariableDecl) MethodHandles.lookup()
+                        .findSpecial(JavacParser.class, "formalParameter", MethodType.methodType(JCTree.JCVariableDecl.class, paramTypes), JackpotJavacParser.class) // NOI18N
+                        .invoke(this, lambdaParam, recordComponents);
+            } catch (Throwable ex) {
+                throw new IllegalStateException(ex);
+            }
+            return result;
+
+        }
+        
         @Override
         public JCVariableDecl formalParameter(boolean lambdaParam) {
             if (token.kind == TokenKind.IDENTIFIER) {
@@ -1371,7 +1391,7 @@ public class Utilities {
 
                     if (peeked.kind == TokenKind.COMMA || peeked.kind == TokenKind.RPAREN) {
                         nextToken();
-                        return new VariableWildcard(ctx, name, F.Ident(name));
+                        return JackpotTrees.createVariableWildcard(ctx, name);
                     }
                 }
             }
@@ -1389,7 +1409,7 @@ public class Utilities {
 
                     if (peeked.kind == TokenKind.COMMA || peeked.kind == TokenKind.RPAREN) {
                         nextToken();
-                        return new VariableWildcard(ctx, name, F.Ident(name));
+                        return JackpotTrees.createVariableWildcard(ctx, name);
                     }
                 }
             }
@@ -1417,7 +1437,35 @@ public class Utilities {
             }
             return super.catchClause();
         }
+        
+        public com.sun.tools.javac.util.List<JCTree> classOrInterfaceOrRecordBodyDeclaration(com.sun.tools.javac.util.Name className, boolean isInterface, boolean isRecord) {
 
+            if (token.kind == TokenKind.IDENTIFIER) {
+                if (token.name().startsWith(dollar)) {
+                    com.sun.tools.javac.util.Name name = token.name();
+
+                    Token peeked = S.token(1);
+
+                    if (peeked.kind == TokenKind.SEMI) {
+                        nextToken();
+                        nextToken();
+
+                        return com.sun.tools.javac.util.List.<JCTree>of(F.Ident(name));
+                    }
+                }
+            }
+
+            com.sun.tools.javac.util.List<JCTree> result = null;
+            Class[] argsType = {com.sun.tools.javac.util.Name.class, boolean.class, boolean.class};
+            try {
+                result = (com.sun.tools.javac.util.List<JCTree>) MethodHandles.lookup().findSpecial(JavacParser.class, "classOrInterfaceOrRecordBodyDeclaration", MethodType.methodType(com.sun.tools.javac.util.List.class, argsType), JackpotJavacParser.class) // NOI18N
+                        .invoke(this, className, false, false);
+            } catch (Throwable ex) {
+                throw new IllegalStateException(ex);
+            }
+            return result;
+        }
+        
         @Override
         public com.sun.tools.javac.util.List<JCTree> classOrInterfaceBodyDeclaration(com.sun.tools.javac.util.Name className, boolean isInterface) {
             if (token.kind == TokenKind.IDENTIFIER) {
@@ -1436,7 +1484,7 @@ public class Utilities {
             }
             return super.classOrInterfaceBodyDeclaration(className, isInterface);
         }
-        
+
         @Override
         protected JCExpression checkExprStat(JCExpression t) {
             if (t.getTag() == JCTree.Tag.IDENT) {

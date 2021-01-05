@@ -242,20 +242,20 @@ public class OQLEngineImpl {
             }
 
             if (q.className != null) {
-                Stack toInspect = new Stack();
-                Set inspected = new HashSet();
+                Stack<JavaClass> toInspect = new Stack<>();
+                Set<JavaClass> inspected = new HashSet<>();
 
                 toInspect.push(clazz);
 
-                Object inspecting = null;
+                JavaClass inspecting = null;
                 while(!toInspect.isEmpty()) {
                     inspecting = toInspect.pop();
                     inspected.add(inspecting);
-                    JavaClass clz = (JavaClass)inspecting;
+                    JavaClass clz = inspecting;
                     if (q.isInstanceOf) {
                         for(Object subclass : clz.getSubClasses()) {
                             if (!inspected.contains(subclass) && !toInspect.contains(subclass)) {
-                                toInspect.push(subclass);
+                                toInspect.push((JavaClass) subclass);
                             }
                         }
                     }
@@ -380,7 +380,7 @@ public class OQLEngineImpl {
     private void init(Snapshot snapshot) throws RuntimeException {
         this.snapshot = snapshot;
         try {
-            ScriptEngineManager manager = Scripting.createManager();
+            ScriptEngineManager manager = Scripting.newBuilder().allowAllAccess(true).build();
             engine = manager.getEngineByName("JavaScript"); // NOI18N
             InputStream strm = getInitStream();
             CompiledScript cs = ((Compilable)engine).compile(new InputStreamReader(strm));

@@ -18,21 +18,27 @@
  */
 package org.netbeans.libs.graalsdk;
 
+import java.io.IOException;
 import java.io.StringWriter;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
+import java.util.NoSuchElementException;
+import javax.script.Bindings;
 import javax.script.Invocable;
+import javax.script.ScriptContext;
 import javax.script.ScriptEngine;
 import javax.script.ScriptEngineFactory;
+import javax.script.ScriptEngineManager;
 import javax.script.ScriptException;
+import org.hamcrest.CoreMatchers;
+import org.junit.Assert;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import org.junit.Assume;
+import static org.junit.Assume.assumeFalse;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
@@ -40,27 +46,59 @@ import org.netbeans.api.scripting.Scripting;
 
 @RunWith(Parameterized.class)
 public class JavaScriptEnginesTest {
-    @Parameterized.Parameters(name = "{0}")
+    @Parameterized.Parameters(name = "{1}:{0}@{4}={2}")
     public static Object[][] engines() {
         List<Object[]> arr = new ArrayList<>();
-        for (ScriptEngineFactory f : Scripting.createManager().getEngineFactories()) {
+        fillArray(Scripting.newBuilder().build(), false, arr);
+        final ScriptEngineManager man = Scripting.newBuilder().allowAllAccess(true).build();
+        fillArray(man, true, arr);
+        return arr.toArray(new Object[0][]);
+    }
+
+    private static void fillArray(final ScriptEngineManager man, boolean allowAllAccess, List<Object[]> arr) {
+        for (ScriptEngineFactory f : man.getEngineFactories()) {
             final String name = f.getEngineName();
             if (
-                f.getMimeTypes().contains("text/javascript") ||
-                name.contains("Nashorn")
-            ) {
-                arr.add(new Object[] { name, f.getScriptEngine() });
+                    f.getMimeTypes().contains("text/javascript") ||
+                    name.contains("Nashorn")
+                    ) {
+                final ScriptEngine eng = f.getScriptEngine();
+                arr.add(new Object[] { name, "engineFactories", implName(eng), eng, allowAllAccess });
+                for (String n : eng.getFactory().getNames()) {
+                    ScriptEngine byName = n == null ? null : man.getEngineByName(n);
+                    if (byName != null && eng.getClass() == byName.getClass()) {
+                        arr.add(new Object[] { n, "name", implName(byName), byName, allowAllAccess });
+                    }
+                }
+                for (String t : eng.getFactory().getMimeTypes()) {
+                    ScriptEngine byType = t == null ? null : man.getEngineByMimeType(t);
+                    if (byType != null && eng.getClass() == byType.getClass()) {
+                        arr.add(new Object[] { t, "type", implName(byType), byType, allowAllAccess });
+                    }
+                }
+                for (String e : eng.getFactory().getExtensions()) {
+                    ScriptEngine byExt = e == null ? null : man.getEngineByExtension(e);
+                    if (byExt != null && eng.getClass() == byExt.getClass()) {
+                        arr.add(new Object[] { e, "ext", implName(byExt), byExt, allowAllAccess });
+                    }
+                }
             }
         }
-        return arr.toArray(new Object[0][]);
+    }
+
+    private static String implName(Object obj) {
+        return obj.getClass().getSimpleName();
     }
 
     private final String engineName;
     private final ScriptEngine engine;
+    private final boolean allowAllAccess;
 
-    public JavaScriptEnginesTest(String engineName, ScriptEngine engine) {
+
+    public JavaScriptEnginesTest(String engineName, Object info, String implName, ScriptEngine engine, boolean allowAllAccess) {
         this.engineName = engineName;
         this.engine = engine;
+        this.allowAllAccess = allowAllAccess;
     }
 
     private Invocable inv() {
@@ -116,7 +154,7 @@ public class JavaScriptEnginesTest {
         try {
             assertEquals("seventy seven", 77, global.mul(11, 7));
         } catch (Exception ex) {
-            assertTrue("GraalVM:js exposes only exported symbols", engineName.equals("GraalVM:js"));
+            assertTrue("GraalVM:js exposes only exported symbols: " + engine.getFactory().getNames(), engine.getFactory().getNames().contains("GraalVM:js"));
         }
         assertEquals("mulExported is accessible in all engines", 77, global.mulExported(11, 7));
     }
@@ -140,7 +178,8 @@ public class JavaScriptEnginesTest {
 
         Point point = inv().getInterface(rawPoint, Point.class);
         if (point == null) {
-            Assume.assumeFalse(engineName.contains("Nashorn"));
+            assumeNotNashorn();
+            assumeNotGraalJsFromJDK();
         }
         assertNotNull("Converted to typed interface", point);
 
@@ -148,6 +187,23 @@ public class JavaScriptEnginesTest {
         assertEquals(-3, point.y());
 
         assertEquals("Power of sqrt(2) rounded", 2, point.z(1.42));
+    }
+
+    @Test
+    public void classOfString() throws Exception {
+        Assume.assumeFalse(allowAllAccess);
+        Object clazz = engine.eval("\n"
+            + "var s = '';\n"
+            + "var n;\n"
+            + "try {\n"
+            + "  var c = s.getClass();\n"
+            + "  n = c.getName();\n"
+            + "} catch (e) {\n"
+            + "  n = null;\n"
+            + "}\n"
+            + "n\n"
+        );
+        assertNull("No getClass attribute of string", clazz);
     }
 
     @Test
@@ -172,6 +228,23 @@ public class JavaScriptEnginesTest {
         assertTrue("Got a number: " + res, res instanceof Number);
         assertEquals(1, ((Number) res).intValue());
         assertNotNull("There was an error calling non-public add method: " + sum.err, sum.err);
+    }
+
+    @Test
+    public void classOfSum() throws Exception {
+        Assume.assumeFalse(allowAllAccess);
+        Assume.assumeFalse("GraalJSScriptEngine".equals(engine.getClass().getSimpleName()));
+
+        Object fn = engine.eval("(function(obj) {\n"
+                + "  try {\n"
+                + "     return obj.getClass().getName();\n"
+                + "  } catch (e) {\n"
+                + "     return null;\n"
+                + "  }\n"
+                + "})\n");
+        Sum sum = new Sum();
+        Object clazz = inv().invokeMethod(fn, "call", null, sum);
+        assertNull("No getClass attribute of string", clazz);
     }
 
     @Test
@@ -215,20 +288,29 @@ public class JavaScriptEnginesTest {
 
         Sum sum = new Sum();
         Object raw = ((Invocable) engine).invokeMethod(fn, "call", null, sum);
-
+        
         ArrayLike res = ((Invocable) engine).getInterface(raw, ArrayLike.class);
         if (res == null) {
-            Assume.assumeFalse(engineName.contains("Nashorn"));
+            assumeNotNashorn();
+            assumeNotGraalJsFromJDK();
         }
         assertNotNull("Result looks like array", res);
 
-        Map<?, ?> list = ((Invocable) engine).getInterface(raw, Map.class);
+        List<?> list = ((Invocable) engine).getInterface(raw, List.class);
         assertEquals("Length of five", 5, list.size());
-        assertEquals(1, list.get("0"));
-        assertEquals(2, list.get("1"));
-        assertEquals("a", list.get("2"));
-        assertEquals(Math.PI, list.get("3"));
-        assertEquals(sum, list.get("4"));
+        assertEquals(1, list.get(0));
+        assertEquals(2, list.get(1));
+        assertEquals("a", list.get(2));
+        assertEquals(Math.PI, list.get(3));
+        assertEquals(sum, list.get(4));
+    }
+
+    private void assumeNotNashorn() {
+        Assume.assumeFalse(engine.getFactory().getNames().contains("Nashorn"));
+    }
+
+    private void assumeNotGraalJsFromJDK() {
+        Assume.assumeFalse(engine.getFactory().getNames().contains("Graal.js"));
     }
 
     @Test
@@ -252,7 +334,7 @@ public class JavaScriptEnginesTest {
         try {
             Object res = ((Invocable) engine).invokeMethod(obj, "unknown");
             fail("There is no such method unknown!" + res);
-        } catch (NoSuchMethodException ex) {
+        } catch (NullPointerException | NoSuchMethodException ex) {
             // OK
         }
     }
@@ -278,5 +360,100 @@ public class JavaScriptEnginesTest {
     @Test(expected = ScriptException.class)
     public void error() throws Exception {
         engine.eval("throw 'Hi'");
+    }
+
+    /**
+     * Checks that exception originating in the script/lang code will be reported
+     * as ScriptException.
+     * @throws Exception 
+     */
+    @Test
+    public void guestExceptionReportedAsRuntime() throws Exception {
+        try {
+            engine.eval("var a = null; a.fn();");
+            fail("Exception expected");
+        } catch (ScriptException ex) {
+            Throwable c = ex.getCause();
+            Assert.assertThat(c, CoreMatchers.is(CoreMatchers.instanceOf(RuntimeException.class)));
+        }
+    }
+
+    public class Callback {
+        public void fn() throws Exception {
+            throw new NoSuchElementException();
+        }
+        
+        public void fn2() throws IOException {
+            throw new IOException();
+        }
+    }
+    
+    /**
+     * Checks that exception thrown in the callback Java code is reported 'as is'.
+     * @throws Exception 
+     */
+    @Test
+    public void hostCheckedExceptionAccessible() throws Exception {
+        // Note: this seems to be broken on GraalVM's JDK js - runtime exceptions are wrapped into
+        // polyglot wrapper and cannot be determined through the chain of getCauses().
+        assumeFalse(engine.getFactory().getEngineName().toLowerCase().contains("graal.js"));
+        
+        try {
+            engine.eval("var x; function setGlobalX(p) { x = p }");
+            ((Invocable)engine).invokeFunction("setGlobalX", new Callback());
+            engine.eval("x.fn2();");
+            fail("Exception expected");
+        } catch (RuntimeException ex) {
+            Throwable c = ex.getCause();
+            Assert.assertThat(c, CoreMatchers.is(CoreMatchers.instanceOf(IOException.class)));
+        } catch (Exception ex) {
+            fail("Runtime subclass is expected");
+        }
+    }
+
+    /**
+     * Checks that exception thrown in the callback Java code is reported 'as is'.
+     * @throws Exception 
+     */
+    @Test
+    public void hostRuntimeExceptionsAccessible() throws Exception {
+        // Note: this seems to be broken on GraalVM's JDK js - runtime exceptions are wrapped into
+        // polyglot wrapper and cannot be determined through the chain of getCauses().
+        assumeFalse(engine.getFactory().getEngineName().toLowerCase().contains("graal.js"));
+        
+        try {
+            engine.eval("var x; function setGlobalX(p) { x = p }");
+            ((Invocable)engine).invokeFunction("setGlobalX", new Callback());
+            engine.eval("x.fn();");
+            fail("Exception expected");
+        } catch (ScriptException ex) {
+            Throwable c = ex.getCause();
+            Assert.assertThat(c, CoreMatchers.is(CoreMatchers.instanceOf(NoSuchElementException.class)));
+        } catch (NoSuchElementException ex) {
+            // this is OK
+        } catch (Exception ex) {
+            
+        }
+    }
+    
+    /** 
+     * Checks that values assigned by various mehtods are visible:
+     * @throws Exception 
+     */
+    @Test
+    public void testEngineGlobalVariablesVisible() throws Exception {
+        Bindings b = engine.getBindings(ScriptContext.ENGINE_SCOPE);
+        b.put("a", 1111);
+        Object o = engine.eval("var b = 3333; a");
+        assertEquals(1111, o);
+        assertEquals(3333, b.get("b"));
+        
+        engine.getContext().setAttribute("a", 2222, ScriptContext.ENGINE_SCOPE);
+        o = engine.eval("var b = 4444; a");
+        assertEquals(2222, o);
+        assertEquals(4444, engine.getContext().getAttribute("b"));
+        assertEquals(4444, engine.getContext().getAttribute("b", ScriptContext.ENGINE_SCOPE));
+        assertNull(engine.getContext().getAttribute("b", ScriptContext.GLOBAL_SCOPE));
+        
     }
 }

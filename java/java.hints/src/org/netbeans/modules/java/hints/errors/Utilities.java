@@ -122,7 +122,6 @@ import org.openide.NotifyDescriptor;
 import org.openide.filesystems.FileObject;
 import org.openide.text.NbDocument;
 import org.openide.util.Exceptions;
-
 import static com.sun.source.tree.Tree.Kind.*;
 import com.sun.source.tree.UnaryTree;
 import com.sun.source.util.TreePathScanner;
@@ -137,7 +136,6 @@ import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.util.JCDiagnostic;
 import com.sun.tools.javac.util.Log;
 import java.net.URI;
-import java.util.concurrent.Callable;
 import javax.lang.model.element.NestingKind;
 import javax.lang.model.type.ErrorType;
 import javax.lang.model.type.UnionType;
@@ -161,6 +159,8 @@ import org.openide.util.Pair;
 public class Utilities {
     public  static final String JAVA_MIME_TYPE = "text/x-java";
     private static final String DEFAULT_NAME = "name";
+    private static final String UNDERSCORE = "_";
+    enum SWITCH_TYPE { TRADITIONAL_SWITCH, RULE_SWITCH, SWITCH_EXPRESSION }
 
     public Utilities() {
     }
@@ -449,10 +449,13 @@ public class Utilities {
             return null;
         }
         
+        diff.commit();
+        return computeChangeInfo(target, diff, tag);
+    }
+        
+    public static ChangeInfo computeChangeInfo(FileObject target, final ModificationResult diff, final Object tag) {
         List<? extends Difference> differences = diff.getDifferences(target);
         ChangeInfo result = null;
-        
-        diff.commit();
         
         try {
             if (differences != null) {
@@ -1644,7 +1647,7 @@ public class Utilities {
         if (outterMostSource != null) {
             sourcePackage = outterMostSource.getEnclosingElement();
         } else if (info.getCompilationUnit().getPackageName() != null) {
-            sourcePackage = info.getTrees().getElement(new TreePath(new TreePath(info.getCompilationUnit()), info.getCompilationUnit().getPackageName()));
+            sourcePackage = info.getTrees().getElement(new TreePath(new TreePath(info.getCompilationUnit()), info.getCompilationUnit().getPackage()));
         } else {
             sourcePackage = info.getElements().getPackageElement("");
         }
@@ -3111,16 +3114,76 @@ public class Utilities {
         return scanner.completesNormally;
     }
 
-    public static void performRewriteRuleSwitch(JavaFix.TransformationContext ctx, TreePath tp, Tree st) {
+    public static boolean isCompatibleWithSwitchExpression(SwitchTree st) {
+        boolean firstCase = true;
+        Name leftTreeName = null;
+        int caseCount = 0;
+        List<? extends CaseTree> cases = st.getCases();
+
+        for (CaseTree ct : cases) {
+            caseCount++;
+            List<StatementTree> statements = new ArrayList<>(ct.getStatements());
+            switch (statements.size()) {
+                case 0:
+                    break;
+                case 1:
+                    if (firstCase && leftTreeName == null && statements.get(0).getKind() == Tree.Kind.RETURN) {
+                        break;
+                    } else if (caseCount == cases.size() && statements.get(0).getKind() == Tree.Kind.EXPRESSION_STATEMENT) {
+                        if (firstCase) {
+                            leftTreeName = getLeftTreeName(statements.get(0));
+                            if (leftTreeName == null) {
+                                return false;
+                            }
+                            break;
+                        } else {
+                            if (leftTreeName != null && leftTreeName.contentEquals(getLeftTreeName(statements.get(0)))) {
+                                break;
+                            } else {
+                                return false;
+                            }
+                        }
+                    } else {
+                        return false;
+                    }
+                case 2:
+                    if (statements.get(0).getKind() == Tree.Kind.EXPRESSION_STATEMENT && statements.get(1).getKind() == Tree.Kind.BREAK) {
+                        if (firstCase) {
+                            leftTreeName = getLeftTreeName(statements.get(0));
+                            if (leftTreeName == null) {
+                                return false;
+                            }
+                            firstCase = false;
+                        }
+                        if (leftTreeName != null && leftTreeName.contentEquals(getLeftTreeName(statements.get(0)))) {
+                            break;
+                        } else {
+                            return false;
+                        }
+                    } else {
+                        return false;
+                    }
+                default:
+                    return false;
+            }
+        }
+        return true;
+    }
+
+    public static void performRewriteRuleSwitch(JavaFix.TransformationContext ctx, TreePath tp, Tree st, boolean isSwitchExpression) {
         WorkingCopy wc = ctx.getWorkingCopy();
         TreeMaker make = wc.getTreeMaker();
         List<CaseTree> newCases = new ArrayList<>();
+        SWITCH_TYPE switchType = SWITCH_TYPE.TRADITIONAL_SWITCH;
+        Tree typeCastTree = null;
         List<? extends CaseTree> cases;
         Set<VariableElement> variablesDeclaredInOtherCases = new HashSet<>();
         List<ExpressionTree> patterns = new ArrayList<>();
-        boolean switchExpressionFlag = st.getKind().toString().equals("SWITCH_EXPRESSION");
-        if (switchExpressionFlag) {
+        Tree leftVariable = null;
+        boolean ruleSwitchFlag = st.getKind().toString().equals(TreeShims.SWITCH_EXPRESSION);
+        if (ruleSwitchFlag) {
             cases = TreeShims.getCases(st);
+            switchType = SWITCH_TYPE.RULE_SWITCH;
         } else {
             cases = ((SwitchTree) st).getCases();
         }
@@ -3130,7 +3193,7 @@ public class Utilities {
             patterns.addAll(TreeShims.getExpressions(ct));
             List<StatementTree> statements;
             if (ct.getStatements() == null) {
-                statements = new ArrayList<>(((JCTree.JCCase) ct).stats);//Collections.singletonList((StatementTree) TreeShims.getBody(ct));
+                statements = new ArrayList<>(((JCTree.JCCase) ct).stats);
             } else {
                 statements = new ArrayList<>(ct.getStatements());
             }
@@ -3139,7 +3202,7 @@ public class Utilities {
                     continue;
                 }
                 //last case, no break
-            } else if (!switchExpressionFlag && statements.get(statements.size() - 1).getKind() == Tree.Kind.BREAK
+            } else if (!ruleSwitchFlag && statements.get(statements.size() - 1).getKind() == Tree.Kind.BREAK
                     && ctx.getWorkingCopy().getTreeUtilities().getBreakContinueTarget(new TreePath(new TreePath(tp, ct), statements.get(statements.size() - 1))) == st) {
                 statements.remove(statements.size() - 1);
             } else {
@@ -3201,7 +3264,24 @@ public class Utilities {
                     body = statements.get(0);
                 }
             }
-            newCases.add(make.Case(patterns, body));
+            if (isSwitchExpression) {
+                switchType = SWITCH_TYPE.SWITCH_EXPRESSION;
+                if (statements.get(0).getKind() == Tree.Kind.RETURN) {
+                    body = ((JCTree.JCReturn) statements.get(0)).getExpression();
+                } else {
+                    JCTree.JCExpressionStatement jceTree = (JCTree.JCExpressionStatement) statements.get(0);
+                    body = ((JCTree.JCAssign) jceTree.expr).rhs;
+                    leftVariable = ((JCTree.JCAssign) jceTree.expr).lhs;
+                }
+                if (body.getKind() == Tree.Kind.TYPE_CAST) {
+                        typeCastTree = ((JCTree.JCTypeCast)body).getType();
+                        body = ((JCTree.JCTypeCast)body).getExpression();
+                    }
+                newCases.add(make.Case(patterns, make.ExpressionStatement((ExpressionTree) body)));
+            } else {
+                newCases.add(make.Case(patterns, body));
+            }
+
             patterns = new ArrayList<>();
             for (StatementTree statement : getSwitchStatement(ct)) {
                 if (statement.getKind() == Tree.Kind.VARIABLE) {
@@ -3209,10 +3289,28 @@ public class Utilities {
                 }
             }
         }
-        if (switchExpressionFlag) {
-            wc.rewrite(st, make.SwitchExpression(TreeShims.getExpressions(st).get(0), newCases));
-        } else {
-            wc.rewrite((SwitchTree) st, make.Switch(((SwitchTree) st).getExpression(), newCases));
+        ExpressionTree et = null;
+        switch (switchType) {
+            case SWITCH_EXPRESSION:
+                et = (ExpressionTree) make.SwitchExpression(TreeShims.getExpressions(st).get(0), newCases);
+                if (typeCastTree != null) {
+                    et = make.Parenthesized(et);
+                    et = make.TypeCast(typeCastTree, et);
+                }
+                if (leftVariable != null) {
+                    wc.rewrite(st, make.ExpressionStatement((ExpressionTree) make.Assignment((ExpressionTree) leftVariable, et)));
+                } else {
+                    wc.rewrite(st, make.Return(et));
+                }
+                break;
+            case RULE_SWITCH:
+                wc.rewrite(st, make.SwitchExpression(TreeShims.getExpressions(st).get(0), newCases));
+                break;
+            case TRADITIONAL_SWITCH:
+                wc.rewrite((SwitchTree) st, make.Switch(((SwitchTree) st).getExpression(), newCases));
+                break;
+            default:
+                break;
         }
     }
 
@@ -3225,5 +3323,23 @@ public class Utilities {
             return null;
         }
    }
+    
+    private static Name getLeftTreeName(StatementTree statement) {
+        if (statement.getKind() != Kind.EXPRESSION_STATEMENT) {
+            return null;
+        }
+        JCTree.JCExpressionStatement jceTree = (JCTree.JCExpressionStatement) statement;
+        if (jceTree.expr.getKind() != Kind.ASSIGNMENT) {
+            return null;
+        }
+        JCTree.JCAssign assignTree = (JCTree.JCAssign) jceTree.expr;
+        return ((JCTree.JCIdent) assignTree.lhs).name;
+    }
 
+    public static boolean isJDKVersionLower(int previewUntilJDK){
+        if(Integer.valueOf(SourceVersion.latest().name().split(UNDERSCORE)[1]).compareTo(previewUntilJDK)<=0)
+            return true;
+
+        return false;
+    }
 }

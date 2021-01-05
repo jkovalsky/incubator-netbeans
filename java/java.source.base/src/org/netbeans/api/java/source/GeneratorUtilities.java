@@ -121,6 +121,7 @@ import org.netbeans.api.lexer.TokenHierarchy;
 import org.netbeans.api.lexer.TokenSequence;
 import org.netbeans.api.queries.FileEncodingQuery;
 import org.netbeans.api.scripting.Scripting;
+import org.netbeans.modules.java.source.TreeShims;
 import org.netbeans.modules.java.source.builder.CommentHandlerService;
 import org.netbeans.modules.java.source.builder.CommentSetImpl;
 import org.netbeans.modules.java.source.parsing.AbstractSourceFileObject;
@@ -1142,7 +1143,13 @@ public final class GeneratorUtilities {
                     el = e.getEnclosingElement();
                     break;
                 default:
-                    assert false : "Illegal element kind: " + e.getKind(); //NOI18N
+                    if (TreeShims.isRecord(e)) {
+                        if (e.getEnclosingElement().getKind() == ElementKind.PACKAGE) {
+                            el = e.getEnclosingElement();
+                        }
+                    } else {
+                        assert false : "Illegal element kind: " + e.getKind(); //NOI18N
+                    }
             }
             if (el != null) {
                 Integer cnt = isStatic ? typeCounts.get((TypeElement)el) : pkgCounts.get((PackageElement)el);
@@ -1821,7 +1828,7 @@ public final class GeneratorUtilities {
             if (parent == null)
                 parent = getElementByFQN(cut, ((MemberSelectTree)qualIdent).getExpression().toString());
             if (parent != null && (parent.getKind().isClass() || parent.getKind().isInterface())) {
-                Scope s = trees.getScope(new TreePath(cut));
+                Scope s = trees.getScope(new TreePath(copy.getCompilationUnit()));
                 for (Element e : parent.getEnclosedElements()) {
                     if (name == e.getSimpleName() && e.getModifiers().contains(Modifier.STATIC) && trees.isAccessible(s, e, (DeclaredType)parent.asType()))
                         return e;

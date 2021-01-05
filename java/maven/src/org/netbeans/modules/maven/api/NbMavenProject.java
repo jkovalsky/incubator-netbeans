@@ -19,6 +19,7 @@
 
 package org.netbeans.modules.maven.api;
 
+import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.beans.PropertyChangeSupport;
 import java.io.File;
@@ -62,6 +63,7 @@ import org.openide.filesystems.FileUtil;
 import org.openide.util.Lookup;
 import org.openide.util.NbBundle.Messages;
 import org.openide.util.RequestProcessor;
+import org.openide.util.Task;
 import org.openide.util.Utilities;
 
 /**
@@ -122,7 +124,7 @@ public final class NbMavenProject {
 
 
     
-    private class FCHSL implements FileChangeListener {
+    private class FCHSL implements FileChangeListener, PropertyChangeListener {
 
 
         @Override
@@ -153,7 +155,11 @@ public final class NbMavenProject {
         @Override
         public void fileAttributeChanged(FileAttributeEvent fe) {
         }
-        
+
+        @Override
+        public void propertyChange(PropertyChangeEvent evt) {
+            doFireReload();
+        }
     }
     
     
@@ -163,6 +169,7 @@ public final class NbMavenProject {
         //TODO oh well, the sources is the actual project instance not the watcher.. a problem?
         support = new PropertyChangeSupport(proj);
         task = createBinaryDownloadTask(BINARYRP);
+        MavenSettings.getDefault().addWeakPropertyChangeListener(listener);
     }
     
     /**
@@ -540,8 +547,8 @@ public final class NbMavenProject {
     /**
      * 
      */ 
-    private void fireProjectReload() {
-        project.fireProjectReload();
+    private RequestProcessor.Task fireProjectReload() {
+        return project.fireProjectReload();
     }
     
     private void doFireReload() {

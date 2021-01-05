@@ -19,7 +19,10 @@
 
 package org.netbeans.modules.debugger.jpda.backend.truffle;
 
+import com.oracle.truffle.api.nodes.LanguageInfo;
 import com.oracle.truffle.api.source.Source;
+import com.oracle.truffle.api.source.SourceSection;
+
 import java.net.URI;
 import java.util.Map;
 import java.util.WeakHashMap;
@@ -36,17 +39,32 @@ final class SourcePosition {
     final long id;
     final String name;
     final String path;
-    final int line;
+    final String sourceSection;
     final String code;
     final URI uri;
+    final String mimeType;
 
-    public SourcePosition(Source source, String name, String path, int line, String code) {
+    public SourcePosition(SourceSection sourceSection, LanguageInfo languageInfo) {
+        Source source = sourceSection.getSource();
         this.id = getId(source);
-        this.name = name;
-        this.path = path;
-        this.line = line;
-        this.code = code;
+        this.name = source.getName();
+        String sourcePath = source.getPath();
+        if (sourcePath == null) {
+            sourcePath = name;
+        }
+        this.path = sourcePath;
+        this.sourceSection = sourceSection.getStartLine() + "," + sourceSection.getStartColumn() + "," + sourceSection.getEndLine() + "," + sourceSection.getEndColumn();
+        this.code = source.getCharacters().toString();
         this.uri = source.getURI();
+        this.mimeType = findMIMEType(source, languageInfo);
+    }
+
+    private String findMIMEType(Source source, LanguageInfo languageInfo) {
+        String mimeType = source.getMimeType();
+        if (mimeType == null && languageInfo != null) {
+            mimeType = languageInfo.getDefaultMimeType();
+        }
+        return mimeType;
     }
 
     private static synchronized long getId(Source s) {

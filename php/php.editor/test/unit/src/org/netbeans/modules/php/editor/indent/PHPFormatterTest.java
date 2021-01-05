@@ -791,4 +791,106 @@ public class PHPFormatterTest extends PHPFormatterTestBase {
         reformatFileContents("testfiles/formatting/flexibleNowdoc_01.php", options);
     }
 
+    // PHP 7.4
+    public void testNullCoalescingAssignment01() throws Exception {
+        // "??="
+        HashMap<String, Object> options = new HashMap<>(FmtOptions.getDefaults());
+        reformatFileContents("testfiles/formatting/nullCoalescingAssignment01.php", options);
+    }
+
+    public void testTypedProperties20_01() throws Exception {
+        HashMap<String, Object> options = new HashMap<>(FmtOptions.getDefaults());
+        reformatFileContents("testfiles/formatting/typedProperties20_01.php", options);
+    }
+
+    public void testSpeadOperatorInArrayExpression_01() throws Exception {
+        // $array = [...$array, 1];
+        HashMap<String, Object> options = new HashMap<>(FmtOptions.getDefaults());
+        reformatFileContents("testfiles/formatting/spreadOperatorInArrayExpression.php", options);
+    }
+
+    public void testSpeadOperatorInArrayExpression_02() throws Exception {
+        HashMap<String, Object> options = new HashMap<>(FmtOptions.getDefaults());
+        reformatFileContents("testfiles/formatting/spreadOperatorInClassConst.php", options);
+    }
+
+    public void testArrowFunctions_01() throws Exception {
+        HashMap<String, Object> options = new HashMap<>(FmtOptions.getDefaults());
+        reformatFileContents("testfiles/formatting/arrowFunctions01.php", options);
+    }
+
+    public void testArrowFunctions_02() throws Exception {
+        HashMap<String, Object> options = new HashMap<>(FmtOptions.getDefaults());
+        reformatFileContents("testfiles/formatting/arrowFunctions02.php", options);
+    }
+
+    public void testNetBeans1047() throws Exception {
+        HashMap<String, Object> options = new HashMap<>(FmtOptions.getDefaults());
+        reformatFileContents("testfiles/formatting/netbeans1047.php", options);
+    }
+
+    // PHP 8.0
+    public void testThrowExpression_01() throws Exception {
+        HashMap<String, Object> options = new HashMap<>(FmtOptions.getDefaults());
+        reformatFileContents("testfiles/formatting/throwExpression01.php", options);
+    }
+
+    public void testMatchExpressionNewLineBracePlacement_01() throws Exception {
+        HashMap<String, Object> options = new HashMap<>(FmtOptions.getDefaults());
+        options.put(FmtOptions.MATCH_BRACE_PLACEMENT, CodeStyle.BracePlacement.NEW_LINE);
+        reformatFileContents("testfiles/formatting/php80/matchExpression_NewLine_01.php", options);
+    }
+
+    public void testMatchExpressionNewLineBracePlacement_02() throws Exception {
+        HashMap<String, Object> options = new HashMap<>(FmtOptions.getDefaults());
+        options.put(FmtOptions.MATCH_BRACE_PLACEMENT, CodeStyle.BracePlacement.NEW_LINE);
+        reformatFileContents("testfiles/formatting/php80/matchExpression_NewLine_02.php", options);
+    }
+
+    public void testMatchExpressionNewLineIndentedBracePlacement_01() throws Exception {
+        HashMap<String, Object> options = new HashMap<>(FmtOptions.getDefaults());
+        options.put(FmtOptions.MATCH_BRACE_PLACEMENT, CodeStyle.BracePlacement.NEW_LINE_INDENTED);
+        reformatFileContents("testfiles/formatting/php80/matchExpression_NewLineIndented_01.php", options);
+    }
+
+    public void testMatchExpressionNewLineIndentedBracePlacement_02() throws Exception {
+        HashMap<String, Object> options = new HashMap<>(FmtOptions.getDefaults());
+        options.put(FmtOptions.MATCH_BRACE_PLACEMENT, CodeStyle.BracePlacement.NEW_LINE_INDENTED);
+        reformatFileContents("testfiles/formatting/php80/matchExpression_NewLineIndented_02.php", options);
+    }
+
+    public void testMatchExpressionPreserveExistingBracePlacement_01() throws Exception {
+        HashMap<String, Object> options = new HashMap<>(FmtOptions.getDefaults());
+        options.put(FmtOptions.MATCH_BRACE_PLACEMENT, CodeStyle.BracePlacement.PRESERVE_EXISTING);
+        reformatFileContents("testfiles/formatting/php80/matchExpression_PreserveExisting_01.php", options);
+    }
+
+    public void testMatchExpressionPreserveExistingBracePlacement_02() throws Exception {
+        HashMap<String, Object> options = new HashMap<>(FmtOptions.getDefaults());
+        options.put(FmtOptions.MATCH_BRACE_PLACEMENT, CodeStyle.BracePlacement.PRESERVE_EXISTING);
+        reformatFileContents("testfiles/formatting/php80/matchExpression_PreserveExisting_02.php", options);
+    }
+
+    public void testMatchExpressionSameLineBracePlacement_01() throws Exception {
+        HashMap<String, Object> options = new HashMap<>(FmtOptions.getDefaults());
+        options.put(FmtOptions.MATCH_BRACE_PLACEMENT, CodeStyle.BracePlacement.SAME_LINE);
+        reformatFileContents("testfiles/formatting/php80/matchExpression_SameLine_01.php", options);
+    }
+
+    public void testMatchExpressionSameLineBracePlacement_02() throws Exception {
+        HashMap<String, Object> options = new HashMap<>(FmtOptions.getDefaults());
+        options.put(FmtOptions.MATCH_BRACE_PLACEMENT, CodeStyle.BracePlacement.SAME_LINE);
+        reformatFileContents("testfiles/formatting/php80/matchExpression_SameLine_02.php", options);
+    }
+
+    public void testNetBeans4970() throws Exception {
+        HashMap<String, Object> options = new HashMap<>(FmtOptions.getDefaults());
+        reformatFileContents("testfiles/formatting/netbeans4970.php", options);
+    }
+
+    public void testSpaceAfterType() throws Exception {
+        HashMap<String, Object> options = new HashMap<>(FmtOptions.getDefaults());
+        reformatFileContents("testfiles/formatting/spaceAfterType.php", options);
+    }
+
 }
